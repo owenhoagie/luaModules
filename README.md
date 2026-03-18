@@ -9,3 +9,7 @@ A collection of modules written in Luau, intended to be used in Roblox to aid cr
 Builder module: `src/WebhookManager.lua`
 
 Documentation and usage example: `src/WebhookManagerExample.lua`
+
+### `ObjectUtils`
+
+Utility module: `src/ObjectUtils.lua`
