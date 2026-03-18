@@ -1,18 +1,18 @@
 --!strict
 
 --[[
-	DiscordWebhook
+	WebhookManager
 
-	A typed Luau builder for Discord webhook payloads in Roblox.
-	Use `DiscordWebhook.new()` to create a message builder, then add content,
+	A typed Luau builder for webhook payloads in Roblox.
+	Use `WebhookManager.new()` to create a message builder, then add content,
 	embeds, and mention settings before calling `:Build()` or `:Send()`.
 
 	Public types exported by this module:
-	- `DiscordWebhook.NewConfig`
-	- `DiscordWebhook.Payload`
-	- `DiscordWebhook.Embed`
-	- `DiscordWebhook.DiscordWebhook`
-	- `DiscordWebhook.EmbedBuilder`
+	- `WebhookManager.NewConfig`
+	- `WebhookManager.Payload`
+	- `WebhookManager.Embed`
+	- `WebhookManager.WebhookManager`
+	- `WebhookManager.EmbedBuilder`
 ]]
 
 export type AllowedMentions = {
@@ -91,25 +91,25 @@ type InternalPayload = {
 	allowed_mentions: AllowedMentions?,
 }
 
-type DiscordWebhookMethods = {
-	SetWebhook: (self: DiscordWebhook, webhook: string) -> DiscordWebhook,
-	SetUsername: (self: DiscordWebhook, username: string?) -> DiscordWebhook,
-	SetAvatar: (self: DiscordWebhook, avatarUrl: string?) -> DiscordWebhook,
-	SetContent: (self: DiscordWebhook, content: string?) -> DiscordWebhook,
-	AppendText: (self: DiscordWebhook, text: string, separator: string?) -> DiscordWebhook,
-	ClearContent: (self: DiscordWebhook) -> DiscordWebhook,
-	SetTTS: (self: DiscordWebhook, enabled: boolean) -> DiscordWebhook,
+type WebhookManagerMethods = {
+	SetWebhook: (self: WebhookManager, webhook: string) -> WebhookManager,
+	SetUsername: (self: WebhookManager, username: string?) -> WebhookManager,
+	SetAvatar: (self: WebhookManager, avatarUrl: string?) -> WebhookManager,
+	SetContent: (self: WebhookManager, content: string?) -> WebhookManager,
+	AppendText: (self: WebhookManager, text: string, separator: string?) -> WebhookManager,
+	ClearContent: (self: WebhookManager) -> WebhookManager,
+	SetTTS: (self: WebhookManager, enabled: boolean) -> WebhookManager,
 	SetAllowedMentions: (
-		self: DiscordWebhook,
+		self: WebhookManager,
 		parse: { string }?,
 		users: { string }?,
 		roles: { string }?,
 		repliedUser: boolean?
-	) -> DiscordWebhook,
-	AddEmbed: (self: DiscordWebhook, embedData: Embed?) -> EmbedBuilder,
-	ClearEmbeds: (self: DiscordWebhook) -> DiscordWebhook,
-	Build: (self: DiscordWebhook) -> Payload,
-	Send: (self: DiscordWebhook, httpService: HttpService?) -> WebhookResponse,
+	) -> WebhookManager,
+	AddEmbed: (self: WebhookManager, embedData: Embed?) -> EmbedBuilder,
+	ClearEmbeds: (self: WebhookManager) -> WebhookManager,
+	Build: (self: WebhookManager) -> Payload,
+	Send: (self: WebhookManager, httpService: HttpService?) -> WebhookResponse,
 }
 
 type EmbedBuilderMethods = {
@@ -124,24 +124,24 @@ type EmbedBuilderMethods = {
 	SetFooter: (self: EmbedBuilder, text: string, iconUrl: string?) -> EmbedBuilder,
 	AddField: (self: EmbedBuilder, name: string, value: string, inline: boolean?) -> EmbedBuilder,
 	ToTable: (self: EmbedBuilder) -> Embed,
-	Done: (self: EmbedBuilder) -> DiscordWebhook,
+	Done: (self: EmbedBuilder) -> WebhookManager,
 }
 
-type DiscordWebhookData = {
+type WebhookManagerData = {
 	_webhook: string,
 	_payload: InternalPayload,
 }
 
 type EmbedBuilderData = {
-	_webhook: DiscordWebhook,
+	_webhook: WebhookManager,
 	_embed: Embed,
 }
 
-export type DiscordWebhook = DiscordWebhookData & DiscordWebhookMethods
+export type WebhookManager = WebhookManagerData & WebhookManagerMethods
 export type EmbedBuilder = EmbedBuilderData & EmbedBuilderMethods
 
-local DiscordWebhook = {} :: any
-DiscordWebhook.__index = DiscordWebhook
+local WebhookManager = {} :: any
+WebhookManager.__index = WebhookManager
 
 local EmbedBuilder = {} :: any
 EmbedBuilder.__index = EmbedBuilder
@@ -297,7 +297,7 @@ local function normalizeColor(color: ColorInput): number
 	return math.clamp(parsed, 0, 0xFFFFFF)
 end
 
-local function newEmbedBuilder(webhook: DiscordWebhook, embed: Embed): EmbedBuilder
+local function newEmbedBuilder(webhook: WebhookManager, embed: Embed): EmbedBuilder
 	return setmetatable({
 		_webhook = webhook,
 		_embed = embed,
@@ -305,7 +305,7 @@ local function newEmbedBuilder(webhook: DiscordWebhook, embed: Embed): EmbedBuil
 end
 
 -- Creates a new Discord webhook builder with optional username and avatar overrides.
-function DiscordWebhook.new(config: NewConfig): DiscordWebhook
+function WebhookManager.new(config: NewConfig): WebhookManager
 	assert(type(config.webhook) == "string" and config.webhook ~= "", "config.webhook is required")
 
 	local self = setmetatable({
@@ -318,37 +318,37 @@ function DiscordWebhook.new(config: NewConfig): DiscordWebhook
 			embeds = {},
 			allowed_mentions = nil,
 		} :: InternalPayload,
-	}, DiscordWebhook) :: DiscordWebhook
+	}, WebhookManager) :: WebhookManager
 
 	return self
 end
 
 -- Changes the target webhook URL for future sends.
-function DiscordWebhook:SetWebhook(webhook: string): DiscordWebhook
+function WebhookManager:SetWebhook(webhook: string): WebhookManager
 	self._webhook = webhook
 	return self
 end
 
 -- Overrides the webhook display name for this message.
-function DiscordWebhook:SetUsername(username: string?): DiscordWebhook
+function WebhookManager:SetUsername(username: string?): WebhookManager
 	self._payload.username = username
 	return self
 end
 
 -- Overrides the webhook avatar for this message.
-function DiscordWebhook:SetAvatar(avatarUrl: string?): DiscordWebhook
+function WebhookManager:SetAvatar(avatarUrl: string?): WebhookManager
 	self._payload.avatar_url = avatarUrl
 	return self
 end
 
 -- Replaces the message body content.
-function DiscordWebhook:SetContent(content: string?): DiscordWebhook
+function WebhookManager:SetContent(content: string?): WebhookManager
 	self._payload.content = content
 	return self
 end
 
 -- Appends text to the message body, defaulting to a newline separator.
-function DiscordWebhook:AppendText(text: string, separator: string?): DiscordWebhook
+function WebhookManager:AppendText(text: string, separator: string?): WebhookManager
 	if self._payload.content == nil or self._payload.content == "" then
 		self._payload.content = text
 	else
@@ -360,24 +360,24 @@ function DiscordWebhook:AppendText(text: string, separator: string?): DiscordWeb
 end
 
 -- Clears the message body content without touching embeds.
-function DiscordWebhook:ClearContent(): DiscordWebhook
+function WebhookManager:ClearContent(): WebhookManager
 	self._payload.content = nil
 	return self
 end
 
 -- Enables or disables Discord text-to-speech for this message.
-function DiscordWebhook:SetTTS(enabled: boolean): DiscordWebhook
+function WebhookManager:SetTTS(enabled: boolean): WebhookManager
 	self._payload.tts = enabled
 	return self
 end
 
 -- Sets Discord's allowed_mentions object so callers can control pings.
-function DiscordWebhook:SetAllowedMentions(
+function WebhookManager:SetAllowedMentions(
 	parse: { string }?,
 	users: { string }?,
 	roles: { string }?,
 	repliedUser: boolean?
-): DiscordWebhook
+): WebhookManager
 	self._payload.allowed_mentions = {
 		parse = copyStringArray(parse),
 		users = copyStringArray(users),
@@ -389,20 +389,20 @@ function DiscordWebhook:SetAllowedMentions(
 end
 
 -- Adds a new embed and returns a builder focused on that embed.
-function DiscordWebhook:AddEmbed(embedData: Embed?): EmbedBuilder
+function WebhookManager:AddEmbed(embedData: Embed?): EmbedBuilder
 	local embed = if embedData ~= nil then copyEmbed(embedData) else {} :: Embed
 	table.insert(self._payload.embeds, embed)
 	return newEmbedBuilder(self, embed)
 end
 
 -- Removes all embeds from the current message.
-function DiscordWebhook:ClearEmbeds(): DiscordWebhook
+function WebhookManager:ClearEmbeds(): WebhookManager
 	self._payload.embeds = {}
 	return self
 end
 
 -- Builds a clean payload table that is ready for HttpService:JSONEncode().
-function DiscordWebhook:Build(): Payload
+function WebhookManager:Build(): Payload
 	local payload: Payload = {
 		username = self._payload.username,
 		avatar_url = self._payload.avatar_url,
@@ -430,7 +430,7 @@ function DiscordWebhook:Build(): Payload
 end
 
 -- Sends the current payload to Discord using Roblox HttpService.
-function DiscordWebhook:Send(httpService: HttpService?): WebhookResponse
+function WebhookManager:Send(httpService: HttpService?): WebhookResponse
 	local service: HttpService = httpService or game:GetService("HttpService")
 	local response = service:RequestAsync({
 		Url = self._webhook,
@@ -541,8 +541,8 @@ function EmbedBuilder:ToTable(): Embed
 end
 
 -- Returns to the parent webhook builder so callers can continue chaining.
-function EmbedBuilder:Done(): DiscordWebhook
+function EmbedBuilder:Done(): WebhookManager
 	return self._webhook
 end
 
-return DiscordWebhook
+return WebhookManager

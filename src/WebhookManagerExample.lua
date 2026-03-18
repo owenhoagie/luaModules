@@ -1,18 +1,18 @@
 --!strict
 
 --[[
-	DiscordWebhookExample
+	WebhookManagerExample
 
 	This file serves as the standalone documentation and usage example for
-	`DiscordWebhook.lua`.
+	`WebhookManager.lua`.
 
 	Setup notes:
-	1. Place `DiscordWebhook.lua` somewhere you can `require()`, such as ReplicatedStorage.
+	1. Place `WebhookManager.lua` somewhere you can `require()`, such as ReplicatedStorage.
 	2. Enable "Allow HTTP Requests" in Roblox Game Settings > Security.
 	3. Replace the placeholder webhook URL before calling `:Send()`.
 
 	Quick API reference:
-	- `DiscordWebhook.new({ webhook, username?, avatarUrl? })`
+	- `WebhookManager.new({ webhook, username?, avatarUrl? })`
 	- `:SetContent(text)` or `:AppendText(text, separator?)`
 	- `:AddEmbed(embedTable?)` to begin editing an embed
 	- `:Done()` to return from the embed builder to the webhook builder
@@ -23,10 +23,10 @@
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local DiscordWebhook = require(ReplicatedStorage.Modules.DiscordWebhook)
+local WebhookManager = require(ReplicatedStorage.Modules.WebhookManager)
 local noMentions: { string } = {}
 
-local webhook = DiscordWebhook.new({
+local webhook = WebhookManager.new({
 	webhook = "https://discord.com/api/webhooks/REPLACE_ME",
 	username = "Build Bot",
 	avatarUrl = "https://cdn.example.com/bot-avatar.png",

@@ -4,8 +4,8 @@ A collection of modules written in Luau, intended to be used in Roblox to aid cr
 
 ## Modules
 
-### `DiscordWebhook`
+### `WebhookManager`
 
-Builder module: `src/DiscordWebhook.lua`
+Builder module: `src/WebhookManager.lua`
 
-Documentation and usage example: `src/DiscordWebhookExample.lua`
+Documentation and usage example: `src/WebhookManagerExample.lua`
