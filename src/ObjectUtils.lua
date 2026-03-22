@@ -1,99 +1,100 @@
---!strict
-
---[[
-	ObjectUtils
-
-	A utility module for resolving Roblox instances from their full path strings,
-	reading properties, and comparing property values safely.
-
-	Numeric values are truncated to 2 decimal places without rounding when using
-	`GetObjectProperty()` or `CompareObjectProperty()`. This helps avoid false
-	negatives caused by tiny floating-point precision differences such as
-	`0.00000002`.
-]]
+-- ObjectUtils.lua
+-- A utility module for getting Roblox objects by their full path string
 
 local ObjectUtils = {}
 
-type CompareResult = (boolean, boolean?, unknown?, string?)
-type GetObjectResult = (boolean, Instance, string?)
-type GetPropertyResult = (boolean, unknown, string?)
-
--- Truncates numbers to 2 decimal places without rounding.
--- Positive numbers use floor; negative numbers use ceil so both truncate toward zero.
-local function truncateNumber(value: number): number
-	if value >= 0 then
-		return math.floor(value * 100) / 100
+local function getPathSegments(fullName)
+	if type(fullName) ~= "string" or fullName == "" then
+		return nil, "fullName must be a non-empty string"
 	end
 
-	return math.ceil(value * 100) / 100
+	local segments = {}
+	for segment in string.gmatch(fullName, "[^%.]+") do
+		table.insert(segments, segment)
+	end
+
+	if #segments == 0 then
+		return nil, "fullName must include at least one path segment"
+	end
+
+	return segments
 end
 
--- Normalizes supported value types so comparisons are resilient to tiny float noise.
-local function normalizeValue(value: unknown): unknown
-	local valueType = typeof(value)
-
-	if valueType == "number" then
-		return truncateNumber(value :: number)
+local function findChildCaseInsensitive(parent, name)
+	local child = parent:FindFirstChild(name)
+	if child then
+		return child
 	end
 
-	if valueType == "Vector2" then
-		local vector = value :: Vector2
-		return Vector2.new(truncateNumber(vector.X), truncateNumber(vector.Y))
+	local lowercaseName = string.lower(name)
+	for _, candidate in ipairs(parent:GetChildren()) do
+		if string.lower(candidate.Name) == lowercaseName then
+			return candidate
+		end
 	end
 
-	if valueType == "Vector3" then
-		local vector = value :: Vector3
-		return Vector3.new(truncateNumber(vector.X), truncateNumber(vector.Y), truncateNumber(vector.Z))
+	return nil
+end
+
+local function resolveRootSegment(segment)
+	if string.lower(segment) == "game" then
+		return game
 	end
 
-	if valueType == "Color3" then
-		local color = value :: Color3
-		return Color3.new(truncateNumber(color.R), truncateNumber(color.G), truncateNumber(color.B))
+	local serviceSuccess, service = pcall(game.GetService, game, segment)
+	if serviceSuccess and service then
+		return service
 	end
 
-	if valueType == "UDim" then
-		local udim = value :: UDim
-		return UDim.new(truncateNumber(udim.Scale), udim.Offset)
+	local propertySuccess, propertyValue = pcall(function()
+		return game[segment]
+	end)
+	if propertySuccess and typeof(propertyValue) == "Instance" then
+		return propertyValue
 	end
 
-	if valueType == "UDim2" then
-		local udim2 = value :: UDim2
-		return UDim2.new(
-			truncateNumber(udim2.X.Scale),
-			udim2.X.Offset,
-			truncateNumber(udim2.Y.Scale),
-			udim2.Y.Offset
-		)
-	end
-
-	return value
+	return findChildCaseInsensitive(game, segment)
 end
 
 --[[
-	Gets an object from the game hierarchy using a dot-separated path string.
-
+	Gets an object from the game hierarchy using a dot-separated path string
+	
 	Parameters:
-		fullName (string): The full path to the object
-			Examples: "Workspace.Part", "Players.PlayerName"
-
+		fullName (string): The full path to the object (e.g., "Workspace.Circle", "game.Players.PlayerName")
+	
 	Returns:
 		success (boolean): Whether the operation succeeded
-		object (Instance): The found object, or the last successfully found parent
+		object (Instance): The found object (or the last successfully found parent on failure)
 		error (string, optional): Error message if the operation failed
-]]
-function ObjectUtils.GetObject(fullName: string): GetObjectResult
-	local segments = string.split(fullName, ".")
-	local current: Instance = game
-
-	for _, segment in ipairs(segments) do
-		if segment == "game" then
-			continue
+		
+	Example:
+		local success, obj, err = ObjectUtils.GetObject("Workspace.Circle")
+		if success then
+			print("Found object:", obj.Name)
+		else
+			print("Failed to find object:", err)
 		end
+--]]
+function ObjectUtils.GetObject(fullName)
+	local segments, pathError = getPathSegments(fullName)
+	if not segments then
+		return false, nil, pathError
+	end
 
-		local nextObject = current:FindFirstChild(segment)
+	local current
 
-		if nextObject == nil then
-			return false, current, string.format("Could not resolve '%s' from '%s'", segment, current:GetFullName())
+	for index, segment in ipairs(segments) do
+		local nextObject
+		if index == 1 then
+			nextObject = resolveRootSegment(segment)
+			if not nextObject then
+				return false, game, string.format("Could not resolve root path segment '%s'", segment)
+			end
+		else
+			nextObject = findChildCaseInsensitive(current, segment)
+			if not nextObject then
+				return false, current, string.format("Could not resolve path segment '%s' under '%s'", segment, current:GetFullName())
+			end
 		end
 
 		current = nextObject
@@ -103,77 +104,47 @@ function ObjectUtils.GetObject(fullName: string): GetObjectResult
 end
 
 --[[
-	Gets an object and returns a specific property value.
-
+	Gets an object and returns a specific property value
+	
 	Parameters:
 		fullName (string): The full path to the object
 		propertyName (string): The name of the property to get
-
+	
 	Returns:
 		success (boolean): Whether the operation succeeded
-		value (unknown): The property value, normalized for float safety when applicable
-		error (string, optional): Error message if the operation failed
-]]
-function ObjectUtils.GetObjectProperty(fullName: string, propertyName: string): GetPropertyResult
-	local success, object, err = ObjectUtils.GetObject(fullName)
+		value (any): The property value
+		error (string, optional): Error message if failed
+--]]
+function ObjectUtils.GetObjectProperty(fullName, propertyName)
+	if type(propertyName) ~= "string" or propertyName == "" then
+		return false, nil, "propertyName must be a non-empty string"
+	end
 
+	local success, object, err = ObjectUtils.GetObject(fullName)
 	if not success then
 		return false, nil, err
 	end
 
-	local propertyValue: unknown = nil
-	local propertySuccess, propertyError = pcall(function()
-		propertyValue = (object :: any)[propertyName]
+	local propertySuccess, propertyValue = pcall(function()
+		return object[propertyName]
 	end)
-
 	if not propertySuccess then
-		return false, nil, propertyError
+		return false, nil, propertyValue
 	end
 
-	return true, normalizeValue(propertyValue)
+	return true, propertyValue
 end
 
 --[[
-	Compares an object's property against an expected value.
-
-	Parameters:
-		fullName (string): The full path to the object
-		propertyName (string): The name of the property to compare
-		expectedValue (unknown): The value to compare against
-
-	Returns:
-		success (boolean): Whether the lookup/property access succeeded
-		matches (boolean, optional): Whether the normalized values match
-		actualValue (unknown, optional): The normalized property value
-		error (string, optional): Error message if the operation failed
-]]
-function ObjectUtils.CompareObjectProperty(
-	fullName: string,
-	propertyName: string,
-	expectedValue: unknown
-): CompareResult
-	local success, propertyValue, err = ObjectUtils.GetObjectProperty(fullName, propertyName)
-
-	if not success then
-		return false, nil, nil, err
-	end
-
-	local normalizedExpected = normalizeValue(expectedValue)
-	local matches = propertyValue == normalizedExpected
-
-	return true, matches, propertyValue
-end
-
---[[
-	Checks if an object exists at the given path.
-
+	Checks if an object exists at the given path
+	
 	Parameters:
 		fullName (string): The full path to check
-
+	
 	Returns:
 		exists (boolean): Whether the object exists
-]]
-function ObjectUtils.ObjectExists(fullName: string): boolean
+--]]
+function ObjectUtils.ObjectExists(fullName)
 	local success = ObjectUtils.GetObject(fullName)
 	return success
 end
