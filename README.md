@@ -13,3 +13,7 @@ Documentation and usage example: `src/WebhookManagerExample.lua`
 ### `ObjectUtils`
 
 Utility module: `src/ObjectUtils.lua`
+
+### `WhitelistManager`
+
+Server-side whitelist module: `src/WhitelistManager.lua`
