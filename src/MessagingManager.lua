@@ -7,14 +7,15 @@
 	styled system messages to specific players.
 
 	What it does:
-	- Create a messenger with a name, color, and font
-	- Update that messenger later through chainable setters
+	- Create a messenger with a name, color, font, size, and optional gradient
+	- Style the message body separately from the messenger prefix
 	- Add and remove tags shown before or after the messenger name
 	- Send a formatted chat message to one player, many players, or everyone
 
 	Important:
 	- Server scripts can target recipients, but the actual chat display happens
 	  on each client through `TextChannel:DisplaySystemMessage()`
+	- Gradients are applied client-side through `TextChatService.OnChatWindowAdded`
 	- Roblox does not automatically filter these system messages, so only send
 	  trusted text or filter player-generated text before calling `:Send()`
 ]]
@@ -22,21 +23,52 @@
 export type RecipientInput = Player | { Player } | nil
 export type ColorInput = Color3 | BrickColor | string
 export type FontInput = Enum.Font | string
+export type GradientStopInput = ColorInput | {
+	Time: number,
+	Color: ColorInput,
+}
+export type GradientInput = ColorSequence | { GradientStopInput } | {
+	Colors: { ColorInput }?,
+	Stops: { GradientStopInput }?,
+	Rotation: number?,
+}
+
+type GradientStopConfig = {
+	Time: number,
+	Color: string,
+}
+
+type GradientConfig = {
+	Rotation: number,
+	Stops: { GradientStopConfig },
+}
 
 export type Config = {
 	Name: string?,
 	Color: ColorInput?,
 	Font: FontInput?,
+	Size: number?,
+	Gradient: GradientInput?,
 	FrontTags: { string }?,
 	BackTags: { string }?,
+	MessageColor: ColorInput?,
+	MessageFont: FontInput?,
+	MessageSize: number?,
+	MessageGradient: GradientInput?,
 }
 
 export type MessengerConfig = {
 	Name: string,
 	Color: string?,
 	Font: string?,
+	Size: number?,
+	Gradient: GradientConfig?,
 	FrontTags: { string },
 	BackTags: { string },
+	MessageColor: string?,
+	MessageFont: string?,
+	MessageSize: number?,
+	MessageGradient: GradientConfig?,
 }
 
 type SerializedMessage = MessengerConfig & {
@@ -47,6 +79,12 @@ type MessengerMethods = {
 	SetName: (self: Messenger, name: string) -> Messenger,
 	SetColor: (self: Messenger, color: ColorInput?) -> Messenger,
 	SetFont: (self: Messenger, font: FontInput?) -> Messenger,
+	SetSize: (self: Messenger, size: number?) -> Messenger,
+	SetGradient: (self: Messenger, gradient: GradientInput?, rotation: number?) -> Messenger,
+	SetMessageColor: (self: Messenger, color: ColorInput?) -> Messenger,
+	SetMessageFont: (self: Messenger, font: FontInput?) -> Messenger,
+	SetMessageSize: (self: Messenger, size: number?) -> Messenger,
+	SetMessageGradient: (self: Messenger, gradient: GradientInput?, rotation: number?) -> Messenger,
 	SetFrontTags: (self: Messenger, tags: { string }?) -> Messenger,
 	SetBackTags: (self: Messenger, tags: { string }?) -> Messenger,
 	AddFrontTag: (self: Messenger, tag: string) -> Messenger,
@@ -64,11 +102,19 @@ type MessengerData = {
 	_name: string,
 	_color: string?,
 	_font: string?,
+	_size: number?,
+	_gradient: GradientConfig?,
+	_messageColor: string?,
+	_messageFont: string?,
+	_messageSize: number?,
+	_messageGradient: GradientConfig?,
 	_frontTags: { string },
 	_backTags: { string },
 }
 
 export type Messenger = MessengerData & MessengerMethods
+
+type OnChatWindowAddedCallback = ((textChatMessage: TextChatMessage) -> ChatWindowMessageProperties?)?
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -78,12 +124,16 @@ local TextChatService = game:GetService("TextChatService")
 local DEFAULT_NAME = "Messenger"
 local REMOTE_NAME = "MessagingManagerRemote"
 local DEFAULT_CHANNEL_NAMES = { "RBXGeneral", "RBXSystem" }
+local MESSAGE_METADATA_PREFIX = "MessagingManager/"
 
 local MessagingManager = {} :: any
 MessagingManager.__index = MessagingManager
 
 local remoteEvent: RemoteEvent? = nil
 local clientConnection: RBXScriptConnection? = nil
+local chatWindowHookInstalled = false
+local pendingMessages: { [string]: SerializedMessage } = {}
+local nextMessageId = 0
 
 local function copyStringArray(values: { string }?): { string }
 	local copied: { string } = {}
@@ -93,6 +143,34 @@ local function copyStringArray(values: { string }?): { string }
 	end
 
 	return copied
+end
+
+local function copyGradientStops(stops: { GradientStopConfig }?): { GradientStopConfig }?
+	if stops == nil then
+		return nil
+	end
+
+	local copied: { GradientStopConfig } = {}
+
+	for _, stop in ipairs(stops) do
+		table.insert(copied, {
+			Time = stop.Time,
+			Color = stop.Color,
+		})
+	end
+
+	return copied
+end
+
+local function copyGradient(gradient: GradientConfig?): GradientConfig?
+	if gradient == nil then
+		return nil
+	end
+
+	return {
+		Rotation = gradient.Rotation,
+		Stops = copyGradientStops(gradient.Stops) or {},
+	}
 end
 
 local function escapeRichText(text: string): string
@@ -112,6 +190,17 @@ end
 
 local function color3ToHex(color: Color3): string
 	return "#" .. toHexChannel(color.R * 255) .. toHexChannel(color.G * 255) .. toHexChannel(color.B * 255)
+end
+
+local function hexToColor3(color: string): Color3
+	local sanitized = color:upper():gsub("#", "")
+	assert(#sanitized == 6 and sanitized:match("^[%x]+$") ~= nil, "Hex colors must contain exactly 6 digits")
+
+	local red = tonumber(string.sub(sanitized, 1, 2), 16) or 0
+	local green = tonumber(string.sub(sanitized, 3, 4), 16) or 0
+	local blue = tonumber(string.sub(sanitized, 5, 6), 16) or 0
+
+	return Color3.fromRGB(red, green, blue)
 end
 
 local function normalizeColor(color: ColorInput?): string?
@@ -162,6 +251,146 @@ local function normalizeFont(font: FontInput?): string?
 	return font :: string
 end
 
+local function normalizeSize(size: number?): number?
+	if size == nil then
+		return nil
+	end
+
+	assert(type(size) == "number" and size > 0, "Size must be a positive number")
+	return math.floor(size + 0.5)
+end
+
+local function sortGradientStops(stops: { GradientStopConfig })
+	table.sort(stops, function(left, right)
+		return left.Time < right.Time
+	end)
+end
+
+local function normalizeGradientStopsFromColors(colors: { ColorInput }): { GradientStopConfig }
+	assert(#colors > 0, "Gradient color arrays must contain at least one color")
+
+	local stops: { GradientStopConfig } = {}
+
+	if #colors == 1 then
+		local color = normalizeColor(colors[1])
+		assert(color ~= nil, "Gradient colors cannot be nil")
+
+		table.insert(stops, {
+			Time = 0,
+			Color = color,
+		})
+		table.insert(stops, {
+			Time = 1,
+			Color = color,
+		})
+
+		return stops
+	end
+
+	for index, color in ipairs(colors) do
+		local normalizedColor = normalizeColor(color)
+		assert(normalizedColor ~= nil, "Gradient colors cannot be nil")
+
+		table.insert(stops, {
+			Time = (index - 1) / (#colors - 1),
+			Color = normalizedColor,
+		})
+	end
+
+	return stops
+end
+
+local function normalizeGradientStopsFromEntries(entries: { GradientStopInput }): { GradientStopConfig }
+	assert(#entries > 0, "Gradient stop arrays must contain at least one entry")
+
+	local firstEntry = entries[1]
+
+	if type(firstEntry) ~= "table" then
+		return normalizeGradientStopsFromColors(entries :: { ColorInput })
+	end
+
+	local stops: { GradientStopConfig } = {}
+
+	for _, entry in ipairs(entries) do
+		assert(type(entry) == "table", "Gradient stop arrays must not mix colors and stop tables")
+
+		local stopTable = entry :: {
+			Time: number,
+			Color: ColorInput,
+		}
+		local normalizedColor = normalizeColor(stopTable.Color)
+
+		assert(normalizedColor ~= nil, "Gradient stop colors cannot be nil")
+		assert(type(stopTable.Time) == "number", "Gradient stops must include a numeric Time")
+
+		table.insert(stops, {
+			Time = math.clamp(stopTable.Time, 0, 1),
+			Color = normalizedColor,
+		})
+	end
+
+	if #stops == 1 then
+		local single = stops[1]
+		return {
+			{
+				Time = 0,
+				Color = single.Color,
+			},
+			{
+				Time = 1,
+				Color = single.Color,
+			},
+		}
+	end
+
+	sortGradientStops(stops)
+	return stops
+end
+
+local function normalizeGradient(gradient: GradientInput?, rotation: number?): GradientConfig?
+	if gradient == nil then
+		return nil
+	end
+
+	local resolvedRotation = if rotation ~= nil then rotation else 0
+	local stops: { GradientStopConfig }
+	local gradientType = typeof(gradient)
+
+	if gradientType == "ColorSequence" then
+		stops = {}
+
+		for _, keypoint in ipairs((gradient :: ColorSequence).Keypoints) do
+			table.insert(stops, {
+				Time = keypoint.Time,
+				Color = color3ToHex(keypoint.Value),
+			})
+		end
+	elseif type(gradient) == "table" then
+		local gradientTable = gradient :: any
+
+		if gradientTable.Rotation ~= nil and rotation == nil then
+			resolvedRotation = gradientTable.Rotation
+		end
+
+		if gradientTable.Stops ~= nil then
+			stops = normalizeGradientStopsFromEntries(gradientTable.Stops)
+		elseif gradientTable.Colors ~= nil then
+			stops = normalizeGradientStopsFromColors(gradientTable.Colors)
+		else
+			stops = normalizeGradientStopsFromEntries(gradient :: { GradientStopInput })
+		end
+	else
+		error("Gradient must be a ColorSequence or a table of colors/stops", 2)
+	end
+
+	sortGradientStops(stops)
+
+	return {
+		Rotation = resolvedRotation,
+		Stops = stops,
+	}
+end
+
 local function removeFirstValue(values: { string }, valueToRemove: string)
 	local index = table.find(values, valueToRemove)
 
@@ -170,35 +399,59 @@ local function removeFirstValue(values: { string }, valueToRemove: string)
 	end
 end
 
+local function buildFontAttributes(color: string?, font: string?, size: number?, includeColor: boolean): { string }
+	local attributes: { string } = {}
+
+	if includeColor and color ~= nil then
+		table.insert(attributes, string.format('color="%s"', color))
+	end
+
+	if font ~= nil then
+		table.insert(attributes, string.format('face="%s"', escapeRichText(font)))
+	end
+
+	if size ~= nil then
+		table.insert(attributes, string.format('size="%d"', size))
+	end
+
+	return attributes
+end
+
+local function buildStyledText(text: string, color: string?, font: string?, size: number?, hasGradient: boolean): string
+	local escapedText = escapeRichText(text)
+	local attributes = buildFontAttributes(color, font, size, not hasGradient)
+
+	if #attributes == 0 then
+		return escapedText
+	end
+
+	return string.format("<font %s>%s</font>", table.concat(attributes, " "), escapedText)
+end
+
 local function buildPrefix(config: MessengerConfig): string
 	local parts: { string } = {}
 
 	for _, tag in ipairs(config.FrontTags) do
-		table.insert(parts, escapeRichText(tag))
+		table.insert(parts, tag)
 	end
 
-	table.insert(parts, escapeRichText(config.Name))
+	table.insert(parts, config.Name)
 
 	for _, tag in ipairs(config.BackTags) do
-		table.insert(parts, escapeRichText(tag))
+		table.insert(parts, tag)
 	end
 
-	local prefix = table.concat(parts, " ")
-	local attributes: { string } = {}
+	return buildStyledText(table.concat(parts, " "), config.Color, config.Font, config.Size, config.Gradient ~= nil)
+end
 
-	if config.Color ~= nil then
-		table.insert(attributes, string.format('color="%s"', config.Color))
-	end
-
-	if config.Font ~= nil then
-		table.insert(attributes, string.format('face="%s"', escapeRichText(config.Font)))
-	end
-
-	if #attributes == 0 then
-		return prefix
-	end
-
-	return string.format("<font %s>%s</font>", table.concat(attributes, " "), prefix)
+local function buildBodyText(payload: SerializedMessage): string
+	return buildStyledText(
+		payload.Message,
+		payload.MessageColor,
+		payload.MessageFont,
+		payload.MessageSize,
+		payload.MessageGradient ~= nil
+	)
 end
 
 local function buildSerializedMessage(config: MessengerConfig, message: string): SerializedMessage
@@ -206,15 +459,20 @@ local function buildSerializedMessage(config: MessengerConfig, message: string):
 		Name = config.Name,
 		Color = config.Color,
 		Font = config.Font,
+		Size = config.Size,
+		Gradient = copyGradient(config.Gradient),
 		FrontTags = copyStringArray(config.FrontTags),
 		BackTags = copyStringArray(config.BackTags),
+		MessageColor = config.MessageColor,
+		MessageFont = config.MessageFont,
+		MessageSize = config.MessageSize,
+		MessageGradient = copyGradient(config.MessageGradient),
 		Message = message,
 	}
 end
 
 local function formatSerializedMessage(payload: SerializedMessage): string
-	local prefix = buildPrefix(payload)
-	return string.format("%s: %s", prefix, escapeRichText(payload.Message))
+	return string.format("%s: %s", buildPrefix(payload), buildBodyText(payload))
 end
 
 local function resolveRecipients(recipients: RecipientInput): { Player }
@@ -305,6 +563,76 @@ local function getDisplayChannel(): TextChannel?
 	return nil
 end
 
+local function deriveMessageProperties(): ChatWindowMessageProperties
+	local configuration = TextChatService.ChatWindowConfiguration
+
+	if configuration ~= nil then
+		return configuration:DeriveNewMessageProperties()
+	end
+
+	return Instance.new("ChatWindowMessageProperties") :: any
+end
+
+local function applyGradient(target: Instance, gradient: GradientConfig?)
+	if gradient == nil then
+		return
+	end
+
+	local keypoints: { ColorSequenceKeypoint } = {}
+
+	for _, stop in ipairs(gradient.Stops) do
+		table.insert(keypoints, ColorSequenceKeypoint.new(stop.Time, hexToColor3(stop.Color)))
+	end
+
+	local uiGradient = Instance.new("UIGradient")
+	uiGradient.Color = ColorSequence.new(keypoints)
+	uiGradient.Rotation = gradient.Rotation
+	uiGradient.Parent = target
+end
+
+local function nextMessageToken(): string
+	nextMessageId += 1
+	return MESSAGE_METADATA_PREFIX .. tostring(nextMessageId)
+end
+
+local function takePendingMessage(metadata: string): SerializedMessage?
+	if string.sub(metadata, 1, #MESSAGE_METADATA_PREFIX) ~= MESSAGE_METADATA_PREFIX then
+		return nil
+	end
+
+	local payload = pendingMessages[metadata]
+	pendingMessages[metadata] = nil
+	return payload
+end
+
+local function installChatWindowHook()
+	if not RunService:IsClient() or chatWindowHookInstalled then
+		return
+	end
+
+	chatWindowHookInstalled = true
+
+	local previousCallback = TextChatService.OnChatWindowAdded :: OnChatWindowAddedCallback
+
+	TextChatService.OnChatWindowAdded = function(textChatMessage: TextChatMessage): ChatWindowMessageProperties?
+		local baseProperties = if previousCallback ~= nil then previousCallback(textChatMessage) else nil
+		local payload = takePendingMessage(textChatMessage.Metadata)
+
+		if payload == nil then
+			return baseProperties
+		end
+
+		local overrideProperties = baseProperties or deriveMessageProperties()
+		overrideProperties.PrefixText = buildPrefix(payload)
+		overrideProperties.Text = buildBodyText(payload)
+
+		applyGradient(overrideProperties, payload.MessageGradient)
+		applyGradient(overrideProperties.PrefixTextProperties, payload.Gradient)
+
+		return overrideProperties
+	end
+end
+
 local function displaySerializedMessage(payload: SerializedMessage)
 	local channel = getDisplayChannel()
 
@@ -313,13 +641,19 @@ local function displaySerializedMessage(payload: SerializedMessage)
 		return
 	end
 
-	channel:DisplaySystemMessage(formatSerializedMessage(payload))
+	installChatWindowHook()
+
+	local metadata = nextMessageToken()
+	pendingMessages[metadata] = payload
+	channel:DisplaySystemMessage(payload.Message, metadata)
 end
 
 local function ensureClientListener()
 	if not RunService:IsClient() or clientConnection ~= nil then
 		return
 	end
+
+	installChatWindowHook()
 
 	local remote = getRemoteEvent()
 	clientConnection = remote.OnClientEvent:Connect(function(payload: SerializedMessage)
@@ -342,6 +676,12 @@ function MessagingManager.new(config: Config?): Messenger
 		_name = resolvedConfig.Name or DEFAULT_NAME,
 		_color = normalizeColor(resolvedConfig.Color),
 		_font = normalizeFont(resolvedConfig.Font),
+		_size = normalizeSize(resolvedConfig.Size),
+		_gradient = normalizeGradient(resolvedConfig.Gradient, nil),
+		_messageColor = normalizeColor(resolvedConfig.MessageColor),
+		_messageFont = normalizeFont(resolvedConfig.MessageFont),
+		_messageSize = normalizeSize(resolvedConfig.MessageSize),
+		_messageGradient = normalizeGradient(resolvedConfig.MessageGradient, nil),
 		_frontTags = copyStringArray(resolvedConfig.FrontTags),
 		_backTags = copyStringArray(resolvedConfig.BackTags),
 	}, MessagingManager) :: Messenger
@@ -366,6 +706,36 @@ end
 
 function MessagingManager:SetFont(font: FontInput?): Messenger
 	self._font = normalizeFont(font)
+	return self
+end
+
+function MessagingManager:SetSize(size: number?): Messenger
+	self._size = normalizeSize(size)
+	return self
+end
+
+function MessagingManager:SetGradient(gradient: GradientInput?, rotation: number?): Messenger
+	self._gradient = normalizeGradient(gradient, rotation)
+	return self
+end
+
+function MessagingManager:SetMessageColor(color: ColorInput?): Messenger
+	self._messageColor = normalizeColor(color)
+	return self
+end
+
+function MessagingManager:SetMessageFont(font: FontInput?): Messenger
+	self._messageFont = normalizeFont(font)
+	return self
+end
+
+function MessagingManager:SetMessageSize(size: number?): Messenger
+	self._messageSize = normalizeSize(size)
+	return self
+end
+
+function MessagingManager:SetMessageGradient(gradient: GradientInput?, rotation: number?): Messenger
+	self._messageGradient = normalizeGradient(gradient, rotation)
 	return self
 end
 
@@ -416,17 +786,20 @@ function MessagingManager:GetConfig(): MessengerConfig
 		Name = self._name,
 		Color = self._color,
 		Font = self._font,
+		Size = self._size,
+		Gradient = copyGradient(self._gradient),
 		FrontTags = copyStringArray(self._frontTags),
 		BackTags = copyStringArray(self._backTags),
+		MessageColor = self._messageColor,
+		MessageFont = self._messageFont,
+		MessageSize = self._messageSize,
+		MessageGradient = copyGradient(self._messageGradient),
 	}
 end
 
 function MessagingManager:Format(message: string): string
 	assert(type(message) == "string" and message ~= "", "message must be a non-empty string")
-
-	local payload = buildSerializedMessage(self:GetConfig(), message)
-
-	return formatSerializedMessage(payload)
+	return formatSerializedMessage(buildSerializedMessage(self:GetConfig(), message))
 end
 
 function MessagingManager:Send(message: string, recipients: RecipientInput): Messenger
