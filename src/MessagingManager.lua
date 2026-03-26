@@ -343,12 +343,8 @@ local function removeFirstValue(values: { string }, valueToRemove: string)
 	end
 end
 
-local function buildFontAttributes(color: Color3?, font: string?, size: number?, includeColor: boolean): { string }
+local function buildFontAttributes(font: string?, size: number?): { string }
 	local attributes: { string } = {}
-
-	if includeColor and color ~= nil then
-		table.insert(attributes, string.format('color="%s"', color3ToHex(color)))
-	end
 
 	if font ~= nil then
 		table.insert(attributes, string.format('face="%s"', escapeRichText(font)))
@@ -361,9 +357,9 @@ local function buildFontAttributes(color: Color3?, font: string?, size: number?,
 	return attributes
 end
 
-local function buildStyledText(text: string, color: Color3?, font: string?, size: number?, hasGradient: boolean): string
+local function buildStyledText(text: string, font: string?, size: number?): string
 	local escapedText = escapeRichText(text)
-	local attributes = buildFontAttributes(color, font, size, not hasGradient)
+	local attributes = buildFontAttributes(font, size)
 
 	if #attributes == 0 then
 		return escapedText
@@ -385,17 +381,11 @@ local function buildPrefix(config: MessengerConfig): string
 		table.insert(parts, tag)
 	end
 
-	return buildStyledText(table.concat(parts, " "), config.Color, config.Font, config.Size, config.Gradient ~= nil)
+	return buildStyledText(table.concat(parts, " "), config.Font, config.Size)
 end
 
 local function buildBodyText(payload: SerializedMessage): string
-	return buildStyledText(
-		payload.Message,
-		payload.MessageColor,
-		payload.MessageFont,
-		payload.MessageSize,
-		payload.MessageGradient ~= nil
-	)
+	return buildStyledText(payload.Message, payload.MessageFont, payload.MessageSize)
 end
 
 local function buildSerializedMessage(config: MessengerConfig, message: string): SerializedMessage
@@ -517,6 +507,16 @@ local function deriveMessageProperties(): ChatWindowMessageProperties
 	return Instance.new("ChatWindowMessageProperties") :: any
 end
 
+local function ensurePrefixTextProperties(properties: ChatWindowMessageProperties): ChatWindowMessageProperties
+	if properties.PrefixTextProperties ~= nil then
+		return properties.PrefixTextProperties
+	end
+
+	local derivedPrefixProperties = deriveMessageProperties()
+	properties.PrefixTextProperties = derivedPrefixProperties
+	return derivedPrefixProperties
+end
+
 local function applyGradient(target: Instance, gradient: GradientConfig?)
 	if gradient == nil then
 		return
@@ -532,6 +532,17 @@ local function applyGradient(target: Instance, gradient: GradientConfig?)
 	uiGradient.Color = ColorSequence.new(keypoints)
 	uiGradient.Rotation = gradient.Rotation
 	uiGradient.Parent = target
+end
+
+local function applyTextAppearance(target: ChatWindowMessageProperties, color: Color3?, gradient: GradientConfig?)
+	if gradient ~= nil then
+		target.TextColor3 = Color3.fromRGB(255, 255, 255)
+		return
+	end
+
+	if color ~= nil then
+		target.TextColor3 = color
+	end
 end
 
 local function nextMessageToken(): string
@@ -566,9 +577,13 @@ local function installChatWindowHook()
 		local overrideProperties = deriveMessageProperties()
 		overrideProperties.PrefixText = buildPrefix(payload)
 		overrideProperties.Text = buildBodyText(payload)
+		applyTextAppearance(overrideProperties, payload.MessageColor, payload.MessageGradient)
+
+		local prefixProperties = ensurePrefixTextProperties(overrideProperties)
+		applyTextAppearance(prefixProperties, payload.Color, payload.Gradient)
 
 		applyGradient(overrideProperties, payload.MessageGradient)
-		applyGradient(overrideProperties.PrefixTextProperties, payload.Gradient)
+		applyGradient(prefixProperties, payload.Gradient)
 
 		return overrideProperties
 	end
