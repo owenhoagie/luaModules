@@ -96,12 +96,14 @@ local function copyStringArray(values: { string }?): { string }
 end
 
 local function escapeRichText(text: string): string
-	return text
+	local escaped = text
 		:gsub("&", "&amp;")
 		:gsub("<", "&lt;")
 		:gsub(">", "&gt;")
 		:gsub('"', "&quot;")
 		:gsub("'", "&apos;")
+
+	return escaped
 end
 
 local function toHexChannel(value: number): string
