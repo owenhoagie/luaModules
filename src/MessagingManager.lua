@@ -9,6 +9,8 @@
 	What it does:
 	- Create a messenger with a name, color, font, size, and optional gradient
 	- Style the message body separately from the messenger prefix
+	- Keep public colors as `Color3` values so callers can preview them in Studio
+	- Accept gradients as `ColorSequence` values or `{ Time, Color }` stop arrays
 	- Add and remove tags shown before or after the messenger name
 	- Send a formatted chat message to one player, many players, or everyone
 
@@ -23,19 +25,18 @@
 export type RecipientInput = Player | { Player } | nil
 export type ColorInput = Color3 | BrickColor | string
 export type FontInput = Enum.Font | string
-export type GradientStopInput = ColorInput | {
+export type GradientStopInput = {
 	Time: number,
 	Color: ColorInput,
 }
 export type GradientInput = ColorSequence | { GradientStopInput } | {
-	Colors: { ColorInput }?,
-	Stops: { GradientStopInput }?,
+	Stops: { GradientStopInput },
 	Rotation: number?,
 }
 
 type GradientStopConfig = {
 	Time: number,
-	Color: string,
+	Color: Color3,
 }
 
 type GradientConfig = {
@@ -59,13 +60,13 @@ export type Config = {
 
 export type MessengerConfig = {
 	Name: string,
-	Color: string?,
+	Color: Color3?,
 	Font: string?,
 	Size: number?,
 	Gradient: GradientConfig?,
 	FrontTags: { string },
 	BackTags: { string },
-	MessageColor: string?,
+	MessageColor: Color3?,
 	MessageFont: string?,
 	MessageSize: number?,
 	MessageGradient: GradientConfig?,
@@ -100,11 +101,11 @@ type MessengerMethods = {
 
 type MessengerData = {
 	_name: string,
-	_color: string?,
+	_color: Color3?,
 	_font: string?,
 	_size: number?,
 	_gradient: GradientConfig?,
-	_messageColor: string?,
+	_messageColor: Color3?,
 	_messageFont: string?,
 	_messageSize: number?,
 	_messageGradient: GradientConfig?,
@@ -113,8 +114,6 @@ type MessengerData = {
 }
 
 export type Messenger = MessengerData & MessengerMethods
-
-type OnChatWindowAddedCallback = ((textChatMessage: TextChatMessage) -> ChatWindowMessageProperties?)?
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -192,18 +191,7 @@ local function color3ToHex(color: Color3): string
 	return "#" .. toHexChannel(color.R * 255) .. toHexChannel(color.G * 255) .. toHexChannel(color.B * 255)
 end
 
-local function hexToColor3(color: string): Color3
-	local sanitized = color:upper():gsub("#", "")
-	assert(#sanitized == 6 and sanitized:match("^[%x]+$") ~= nil, "Hex colors must contain exactly 6 digits")
-
-	local red = tonumber(string.sub(sanitized, 1, 2), 16) or 0
-	local green = tonumber(string.sub(sanitized, 3, 4), 16) or 0
-	local blue = tonumber(string.sub(sanitized, 5, 6), 16) or 0
-
-	return Color3.fromRGB(red, green, blue)
-end
-
-local function normalizeColor(color: ColorInput?): string?
+local function normalizeColor(color: ColorInput?): Color3?
 	if color == nil then
 		return nil
 	end
@@ -211,11 +199,11 @@ local function normalizeColor(color: ColorInput?): string?
 	local valueType = typeof(color)
 
 	if valueType == "Color3" then
-		return color3ToHex(color :: Color3)
+		return color :: Color3
 	end
 
 	if valueType == "BrickColor" then
-		return color3ToHex((color :: BrickColor).Color)
+		return (color :: BrickColor).Color
 	end
 
 	local sanitized = (color :: string):upper():gsub("#", ""):gsub("^0X", "")
@@ -233,7 +221,10 @@ local function normalizeColor(color: ColorInput?): string?
 	end
 
 	assert(#sanitized == 6 and sanitized:match("^[%x]+$") ~= nil, "Color must be a Color3, BrickColor, or hex string")
-	return "#" .. sanitized
+	local red = tonumber(string.sub(sanitized, 1, 2), 16) or 0
+	local green = tonumber(string.sub(sanitized, 3, 4), 16) or 0
+	local blue = tonumber(string.sub(sanitized, 5, 6), 16) or 0
+	return Color3.fromRGB(red, green, blue)
 end
 
 local function normalizeFont(font: FontInput?): string?
@@ -266,65 +257,20 @@ local function sortGradientStops(stops: { GradientStopConfig })
 	end)
 end
 
-local function normalizeGradientStopsFromColors(colors: { ColorInput }): { GradientStopConfig }
-	assert(#colors > 0, "Gradient color arrays must contain at least one color")
-
-	local stops: { GradientStopConfig } = {}
-
-	if #colors == 1 then
-		local color = normalizeColor(colors[1])
-		assert(color ~= nil, "Gradient colors cannot be nil")
-
-		table.insert(stops, {
-			Time = 0,
-			Color = color,
-		})
-		table.insert(stops, {
-			Time = 1,
-			Color = color,
-		})
-
-		return stops
-	end
-
-	for index, color in ipairs(colors) do
-		local normalizedColor = normalizeColor(color)
-		assert(normalizedColor ~= nil, "Gradient colors cannot be nil")
-
-		table.insert(stops, {
-			Time = (index - 1) / (#colors - 1),
-			Color = normalizedColor,
-		})
-	end
-
-	return stops
-end
-
 local function normalizeGradientStopsFromEntries(entries: { GradientStopInput }): { GradientStopConfig }
 	assert(#entries > 0, "Gradient stop arrays must contain at least one entry")
-
-	local firstEntry = entries[1]
-
-	if type(firstEntry) ~= "table" then
-		return normalizeGradientStopsFromColors(entries :: { ColorInput })
-	end
 
 	local stops: { GradientStopConfig } = {}
 
 	for _, entry in ipairs(entries) do
-		assert(type(entry) == "table", "Gradient stop arrays must not mix colors and stop tables")
-
-		local stopTable = entry :: {
-			Time: number,
-			Color: ColorInput,
-		}
-		local normalizedColor = normalizeColor(stopTable.Color)
+		local normalizedColor = normalizeColor(entry.Color)
 
 		assert(normalizedColor ~= nil, "Gradient stop colors cannot be nil")
-		assert(type(stopTable.Time) == "number", "Gradient stops must include a numeric Time")
+		assert(type(entry.Time) == "number", "Gradient stops must include a numeric Time")
+		assert(entry.Time >= 0 and entry.Time <= 1, "Gradient stop Time values must be between 0 and 1")
 
 		table.insert(stops, {
-			Time = math.clamp(stopTable.Time, 0, 1),
+			Time = entry.Time,
 			Color = normalizedColor,
 		})
 	end
@@ -362,7 +308,7 @@ local function normalizeGradient(gradient: GradientInput?, rotation: number?): G
 		for _, keypoint in ipairs((gradient :: ColorSequence).Keypoints) do
 			table.insert(stops, {
 				Time = keypoint.Time,
-				Color = color3ToHex(keypoint.Value),
+				Color = keypoint.Value,
 			})
 		end
 	elseif type(gradient) == "table" then
@@ -374,13 +320,11 @@ local function normalizeGradient(gradient: GradientInput?, rotation: number?): G
 
 		if gradientTable.Stops ~= nil then
 			stops = normalizeGradientStopsFromEntries(gradientTable.Stops)
-		elseif gradientTable.Colors ~= nil then
-			stops = normalizeGradientStopsFromColors(gradientTable.Colors)
 		else
 			stops = normalizeGradientStopsFromEntries(gradient :: { GradientStopInput })
 		end
 	else
-		error("Gradient must be a ColorSequence or a table of colors/stops", 2)
+		error("Gradient must be a ColorSequence or a table of { Time, Color } stops", 2)
 	end
 
 	sortGradientStops(stops)
@@ -399,11 +343,11 @@ local function removeFirstValue(values: { string }, valueToRemove: string)
 	end
 end
 
-local function buildFontAttributes(color: string?, font: string?, size: number?, includeColor: boolean): { string }
+local function buildFontAttributes(color: Color3?, font: string?, size: number?, includeColor: boolean): { string }
 	local attributes: { string } = {}
 
 	if includeColor and color ~= nil then
-		table.insert(attributes, string.format('color="%s"', color))
+		table.insert(attributes, string.format('color="%s"', color3ToHex(color)))
 	end
 
 	if font ~= nil then
@@ -417,7 +361,7 @@ local function buildFontAttributes(color: string?, font: string?, size: number?,
 	return attributes
 end
 
-local function buildStyledText(text: string, color: string?, font: string?, size: number?, hasGradient: boolean): string
+local function buildStyledText(text: string, color: Color3?, font: string?, size: number?, hasGradient: boolean): string
 	local escapedText = escapeRichText(text)
 	local attributes = buildFontAttributes(color, font, size, not hasGradient)
 
@@ -581,7 +525,7 @@ local function applyGradient(target: Instance, gradient: GradientConfig?)
 	local keypoints: { ColorSequenceKeypoint } = {}
 
 	for _, stop in ipairs(gradient.Stops) do
-		table.insert(keypoints, ColorSequenceKeypoint.new(stop.Time, hexToColor3(stop.Color)))
+		table.insert(keypoints, ColorSequenceKeypoint.new(stop.Time, stop.Color))
 	end
 
 	local uiGradient = Instance.new("UIGradient")
@@ -612,17 +556,14 @@ local function installChatWindowHook()
 
 	chatWindowHookInstalled = true
 
-	local previousCallback = TextChatService.OnChatWindowAdded :: OnChatWindowAddedCallback
-
 	TextChatService.OnChatWindowAdded = function(textChatMessage: TextChatMessage): ChatWindowMessageProperties?
-		local baseProperties = if previousCallback ~= nil then previousCallback(textChatMessage) else nil
 		local payload = takePendingMessage(textChatMessage.Metadata)
 
 		if payload == nil then
-			return baseProperties
+			return nil
 		end
 
-		local overrideProperties = baseProperties or deriveMessageProperties()
+		local overrideProperties = deriveMessageProperties()
 		overrideProperties.PrefixText = buildPrefix(payload)
 		overrideProperties.Text = buildBodyText(payload)
 

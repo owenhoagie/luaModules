@@ -32,12 +32,15 @@ local messenger = MessagingManager.new({
 	Font = Enum.Font.GothamBold,
 	Size = 18,
 	Gradient = {
-		Colors = { "#FFF2A8", "#FF9F1C" },
 		Rotation = 0,
+		Stops = {
+			{ Time = 0, Color = Color3.fromRGB(255, 242, 168) },
+			{ Time = 1, Color = Color3.fromRGB(255, 159, 28) },
+		},
 	},
 	FrontTags = { "[SYSTEM]" },
 	BackTags = { "[LIVE]" },
-	MessageColor = "#D9F0FF",
+	MessageColor = Color3.fromRGB(217, 240, 255),
 	MessageFont = Enum.Font.SourceSans,
 	MessageSize = 20,
 })
@@ -46,7 +49,7 @@ messenger:Send("Warmup has started.", Players:GetPlayers())
 
 messenger
 	:SetName("Round Manager")
-	:SetColor("#7BDFF2")
+	:SetColor(Color3.fromRGB(123, 223, 242))
 	:SetFont(Enum.Font.SourceSansBold)
 	:SetSize(20)
 	:RemoveBackTag("[LIVE]")
@@ -55,7 +58,11 @@ messenger
 	:SetMessageFont(Enum.Font.GothamMedium)
 	:SetMessageSize(22)
 	:SetMessageGradient({
-		Colors = { "#7BDFF2", "#B2F7EF", "#EFF7F6" },
 		Rotation = 0,
+		Stops = {
+			{ Time = 0, Color = Color3.fromRGB(123, 223, 242) },
+			{ Time = 0.5, Color = Color3.fromRGB(178, 247, 239) },
+			{ Time = 1, Color = Color3.fromRGB(239, 247, 246) },
+		},
 	})
 	:Send("Round 1 begins in 10 seconds.", Players:GetPlayers())
