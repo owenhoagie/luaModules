@@ -14,6 +14,12 @@ Documentation and usage example: `src/WebhookManagerExample.lua`
 
 Utility module: `src/ObjectUtils.lua`
 
+### `MessagingManager`
+
+Shared server/client chat messenger: `src/MessagingManager.lua`
+
+Documentation and usage example: `src/MessagingManagerExample.lua`
+
 ### `WhitelistManager`
 
 Server-side whitelist module: `src/WhitelistManager.lua`
