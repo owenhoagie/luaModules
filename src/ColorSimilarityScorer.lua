@@ -7,11 +7,12 @@
 	https://dialed.gg/scoring.
 
 	Input HSB values use:
-	- Hue: 0-360 degrees
-	- Saturation: 0-100 percent
-	- Brightness: 0-100 percent
+	- Hue: 0-1
+	- Saturation: 0-1
+	- Brightness: 0-1
 
-	The score is returned on a 0-10 scale.
+	This matches normalized decimal values such as Roblox's `Color3:ToHSV()`
+	output. The score is returned on a 0-10 scale.
 ]]
 
 export type HSBColor = {
@@ -51,12 +52,25 @@ local function assertFiniteNumber(name: string, value: number)
 	assert(value ~= math.huge and value ~= -math.huge, string.format("%s must be finite", name))
 end
 
+local function assertUnitInterval(name: string, value: number)
+	assertFiniteNumber(name, value)
+	assert(value >= 0 and value <= 1, string.format("%s must be between 0 and 1", name))
+end
+
 local function assertPercent(name: string, value: number)
 	assertFiniteNumber(name, value)
 	assert(value >= 0 and value <= 100, string.format("%s must be between 0 and 100", name))
 end
 
-local function validateHsb(label: string, hue: number, saturation: number, brightness: number): (number, number, number)
+local function validateNormalizedHsb(label: string, hue: number, saturation: number, brightness: number): (number, number, number)
+	assertUnitInterval(label .. " hue", hue)
+	assertUnitInterval(label .. " saturation", saturation)
+	assertUnitInterval(label .. " brightness", brightness)
+
+	return normalizeHue(hue * 360), saturation * 100, brightness * 100
+end
+
+local function validateDialedHsb(label: string, hue: number, saturation: number, brightness: number): (number, number, number)
 	assertFiniteNumber(label .. " hue", hue)
 	assertPercent(label .. " saturation", saturation)
 	assertPercent(label .. " brightness", brightness)
@@ -66,7 +80,7 @@ end
 
 local function validateColor(label: string, color: HSBColor): (number, number, number)
 	assert(type(color) == "table", string.format("%s must be an HSB table", label))
-	return validateHsb(label, color.H, color.S, color.B)
+	return validateNormalizedHsb(label, color.H, color.S, color.B)
 end
 
 local function hsbToRgb(hue: number, saturation: number, brightness: number): (number, number, number)
@@ -185,8 +199,8 @@ function ColorSimilarityScorer.AnalyzeHsb(
 	guessSaturation: number,
 	guessBrightness: number
 ): ScoreBreakdown
-	local h1, s1, b1 = validateHsb("target", targetHue, targetSaturation, targetBrightness)
-	local h2, s2, b2 = validateHsb("guess", guessHue, guessSaturation, guessBrightness)
+	local h1, s1, b1 = validateNormalizedHsb("target", targetHue, targetSaturation, targetBrightness)
+	local h2, s2, b2 = validateNormalizedHsb("guess", guessHue, guessSaturation, guessBrightness)
 
 	return calculateScore(h1, s1, b1, h2, s2, b2)
 end
@@ -200,6 +214,38 @@ function ColorSimilarityScorer.ScoreHsb(
 	guessBrightness: number
 ): number
 	return ColorSimilarityScorer.AnalyzeHsb(
+		targetHue,
+		targetSaturation,
+		targetBrightness,
+		guessHue,
+		guessSaturation,
+		guessBrightness
+	).Score
+end
+
+function ColorSimilarityScorer.AnalyzeDialedScale(
+	targetHue: number,
+	targetSaturation: number,
+	targetBrightness: number,
+	guessHue: number,
+	guessSaturation: number,
+	guessBrightness: number
+): ScoreBreakdown
+	local h1, s1, b1 = validateDialedHsb("target", targetHue, targetSaturation, targetBrightness)
+	local h2, s2, b2 = validateDialedHsb("guess", guessHue, guessSaturation, guessBrightness)
+
+	return calculateScore(h1, s1, b1, h2, s2, b2)
+end
+
+function ColorSimilarityScorer.ScoreDialedScale(
+	targetHue: number,
+	targetSaturation: number,
+	targetBrightness: number,
+	guessHue: number,
+	guessSaturation: number,
+	guessBrightness: number
+): number
+	return ColorSimilarityScorer.AnalyzeDialedScale(
 		targetHue,
 		targetSaturation,
 		targetBrightness,

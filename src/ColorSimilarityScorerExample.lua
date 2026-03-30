@@ -3,15 +3,15 @@
 local ColorSimilarityScorer = require(script.Parent.ColorSimilarityScorer)
 
 local target = {
-	H = 210,
-	S = 72,
-	B = 78,
+	H = 0.42,
+	S = 0.77,
+	B = 0.24,
 }
 
 local guess = {
-	H = 205,
-	S = 68,
-	B = 80,
+	H = 0.40,
+	S = 0.74,
+	B = 0.27,
 }
 
 local score = ColorSimilarityScorer.Score(target, guess)
