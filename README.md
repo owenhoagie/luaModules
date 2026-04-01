@@ -14,6 +14,10 @@ Documentation and usage example: `src/WebhookManagerExample.lua`
 
 Utility module: `src/ObjectUtils.lua`
 
+### `TextContrast`
+
+Utility module for choosing white or black text from a background `Color3`: `src/TextContrast.lua`
+
 ### `ColorSimilarityScorer`
 
 Color similarity module based on Dialed's public scoring breakdown: `src/ColorSimilarityScorer.lua`
