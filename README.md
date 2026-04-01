@@ -18,6 +18,12 @@ Utility module: `src/ObjectUtils.lua`
 
 Utility module for choosing white or black text from a background `Color3`: `src/TextContrast.lua`
 
+### `PercentageTextAnimator`
+
+Utility module for easing a `TextLabel` from `0.00 %` to a target percentage: `src/PercentageTextAnimator.lua`
+
+Documentation and usage example: `src/PercentageTextAnimatorExample.lua`
+
 ### `ColorSimilarityScorer`
 
 Color similarity module based on Dialed's public scoring breakdown: `src/ColorSimilarityScorer.lua`
